@@ -1,1 +1,20 @@
+# Build output
 /target
+
+# Editor / OS junk
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs and local config
+*.log
+config.local.toml
+
+# Audio and lyrics, so test files never end up in the repo
+*.flac
+*.m4a
+*.mp3
+*.wav
+*.ogg
+*.lrc
