@@ -17,6 +17,9 @@ pub enum Error {
 
     #[error("audio output error: {0}")]
     Audio(String),
+
+    #[error("lyrics error: {0}")]
+    Lyrics(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

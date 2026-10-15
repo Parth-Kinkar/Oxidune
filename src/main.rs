@@ -3,6 +3,7 @@ mod audio;
 mod domain;
 mod error;
 mod library;
+mod lyrics;
 mod ui;
 
 use std::env;
@@ -12,15 +13,19 @@ use app::App;
 use library::Library;
 
 fn main() -> error::Result<()> {
-    let dir = env::args()
-        .nth(1)
+    let mut args: Vec<String> = env::args().skip(1).collect();
+    let offline = args.iter().any(|arg| arg == "--offline");
+    args.retain(|arg| arg != "--offline");
+
+    let dir = args
+        .first()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
 
     let library = Library::load(&dir)?;
 
     let mut terminal = ratatui::init();
-    let result = App::new(library).run(&mut terminal);
+    let result = App::new(library, !offline).run(&mut terminal);
     ratatui::restore();
     result
 }

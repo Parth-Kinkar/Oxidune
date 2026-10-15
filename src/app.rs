@@ -1,14 +1,15 @@
 use std::time::Duration;
 
+use crate::audio::{Command, Event as PlayerEvent, Player, StreamSpec};
+use crate::domain::{Lyrics, Queue, Track};
+use crate::error::Result;
+use crate::library::Library;
+use crate::lyrics::{LyricsEvent, LyricsService};
+use crate::ui;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event as TermEvent, KeyCode, KeyEventKind};
 use ratatui::widgets::ListState;
-
-use crate::audio::{Command, Event as PlayerEvent, Player, StreamSpec};
-use crate::domain::{Queue, Track};
-use crate::error::Result;
-use crate::library::Library;
-use crate::ui;
+use std::path::Path;
 
 const SEEK_STEP: Duration = Duration::from_secs(5);
 const INPUT_POLL: Duration = Duration::from_millis(50);
@@ -18,6 +19,14 @@ pub enum PlaybackState {
     Stopped,
     Playing,
     Paused,
+}
+
+/// What the lyrics panel should show for the current track.
+pub enum LyricsState {
+    None,
+    Loading,
+    Ready(Lyrics),
+    Missing,
 }
 
 /// Application state and input handling. Draws nothing, decodes nothing.
@@ -31,10 +40,13 @@ pub struct App {
     list_state: ListState,
     message: Option<String>,
     should_quit: bool,
+    lyrics_service: LyricsService,
+    lyrics: LyricsState,
+    show_lyrics: bool,
 }
 
 impl App {
-    pub fn new(library: Library) -> Self {
+    pub fn new(library: Library, fetch_lyrics: bool) -> Self {
         let queue = Queue::new(library.len());
         let mut list_state = ListState::default();
         if library.len() > 0 {
@@ -51,6 +63,9 @@ impl App {
             list_state,
             message: None,
             should_quit: false,
+            lyrics_service: LyricsService::start(fetch_lyrics),
+            lyrics: LyricsState::None,
+            show_lyrics: true,
         }
     }
 
@@ -59,6 +74,7 @@ impl App {
             terminal.draw(|frame| ui::render(frame, self))?;
             self.handle_input()?;
             self.handle_player_events();
+            self.handle_lyrics_events();
         }
         Ok(())
     }
@@ -123,8 +139,17 @@ impl App {
             KeyCode::Char('r') => self.queue.cycle_repeat(),
             KeyCode::Right => self.seek_forward(),
             KeyCode::Left => self.seek_backward(),
+            KeyCode::Char('l') => self.show_lyrics = !self.show_lyrics,
             _ => {}
         }
+    }
+
+    pub fn lyrics(&self) -> &LyricsState {
+        &self.lyrics
+    }
+
+    pub fn show_lyrics(&self) -> bool {
+        self.show_lyrics
     }
 
     // ---- playback actions ----
@@ -153,8 +178,10 @@ impl App {
             return;
         };
         self.player.send(Command::Play(track.path.clone()));
+        self.lyrics_service.request(track.clone());
         self.state = PlaybackState::Playing;
         self.position = Duration::ZERO;
+        self.lyrics = LyricsState::Loading;
         self.message = None;
     }
 
@@ -198,6 +225,7 @@ impl App {
         self.state = PlaybackState::Stopped;
         self.position = Duration::ZERO;
         self.spec = None;
+        self.lyrics = LyricsState::None;
     }
 
     // ---- events from the player thread ----
@@ -223,5 +251,23 @@ impl App {
         } else {
             self.stop();
         }
+    }
+
+    fn handle_lyrics_events(&mut self) {
+        while let Ok(event) = self.lyrics_service.events().try_recv() {
+            match event {
+                LyricsEvent::Loaded { path, lyrics } if self.is_current(&path) => {
+                    self.lyrics = LyricsState::Ready(lyrics);
+                }
+                LyricsEvent::Missing { path } if self.is_current(&path) => {
+                    self.lyrics = LyricsState::Missing;
+                }
+                _ => {} // a result for a track we've already moved past
+            }
+        }
+    }
+
+    fn is_current(&self, path: &Path) -> bool {
+        self.now_playing().is_some_and(|track| track.path == path)
     }
 }
