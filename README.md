@@ -74,7 +74,3 @@ cargo test
 ## Roadmap
 
 See [Upcoming_features.md](Upcoming_features.md).
-
-## License
-
-Choose a license before publishing, for example `MIT OR Apache-2.0`, and add a `LICENSE` file.
