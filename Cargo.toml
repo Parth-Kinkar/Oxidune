@@ -1,0 +1,13 @@
+[package]
+name = "TuneTerm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cpal = "0.18.2"
+crossbeam-channel = "0.5.17"
+lofty = "0.25.4"
+ratatui = "0.30.2"
+symphonia = { version = "0.5", features = ["all-codecs", "all-formats"] }
+thiserror = "2.0.21"
+walkdir = "2.5.0"
