@@ -136,7 +136,7 @@ impl App {
             KeyCode::Char('n') => self.play_next(),
             KeyCode::Char('p') => self.play_previous(),
             KeyCode::Char('s') => self.player.send(Command::Stop),
-            KeyCode::Char('r') => self.queue.cycle_repeat(),
+            KeyCode::Char('r') => self.cycle_repeat(),
             KeyCode::Right => self.seek_forward(),
             KeyCode::Left => self.seek_backward(),
             KeyCode::Char('l') => self.show_lyrics = !self.show_lyrics,
@@ -173,16 +173,56 @@ impl App {
         }
     }
 
+    /// Starts the queue's current track from scratch.
     fn start_current(&mut self) {
         let Some(track) = self.now_playing() else {
             return;
         };
         self.player.send(Command::Play(track.path.clone()));
-        self.lyrics_service.request(track.clone());
+        self.on_track_started();
+    }
+
+    /// UI bookkeeping for when the queue's current track starts playing,
+    /// whether we asked for it (Play) or the player moved on by itself (gapless).
+    fn on_track_started(&mut self) {
+        if let Some(track) = self.now_playing() {
+            self.lyrics_service.request(track.clone());
+        }
         self.state = PlaybackState::Playing;
         self.position = Duration::ZERO;
         self.lyrics = LyricsState::Loading;
         self.message = None;
+        self.update_next();
+    }
+
+    /// Tells the player which track follows the current one, so it can
+    /// open it early and switch over without a gap.
+    fn update_next(&self) {
+        let next = self
+            .queue
+            .peek_next()
+            .and_then(|index| self.library.get(index))
+            .map(|track| track.path.clone());
+        self.player.send(Command::SetNext(next));
+    }
+
+    fn cycle_repeat(&mut self) {
+        self.queue.cycle_repeat();
+        self.update_next(); // what comes next may have changed
+    }
+
+    /// The player crossed into the preloaded next track on its own.
+    fn on_track_advanced(&mut self, path: &Path) {
+        let expected = self
+            .queue
+            .peek_next()
+            .and_then(|index| self.library.get(index))
+            .map(|track| track.path.as_path());
+        if expected != Some(path) {
+            return; // stale: the user has already moved on
+        }
+        self.queue.on_track_end();
+        self.on_track_started();
     }
 
     fn toggle_pause(&mut self) {
@@ -241,6 +281,7 @@ impl App {
                     self.stop();
                     self.message = Some(message);
                 }
+                PlayerEvent::Advanced(path) => self.on_track_advanced(&path),
             }
         }
     }

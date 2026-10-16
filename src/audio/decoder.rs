@@ -51,7 +51,10 @@ impl SymphoniaDecoder {
         let probed = symphonia::default::get_probe().format(
             &hint,
             stream,
-            &FormatOptions::default(),
+            &FormatOptions {
+                enable_gapless: true,
+                ..Default::default()
+            },
             &MetadataOptions::default(),
         )?;
         let format = probed.format;

@@ -73,6 +73,19 @@ impl Queue {
         next
     }
 
+    /// The track that will follow the current one, without moving to it.
+    pub fn peek_next(&self) -> Option<usize> {
+        let cursor = self.cursor?;
+        if self.repeat == RepeatMode::One {
+            return Some(self.order[cursor]);
+        }
+        match self.order.get(cursor + 1) {
+            Some(&track) => Some(track),
+            None if self.repeat == RepeatMode::All => self.order.first().copied(),
+            None => None,
+        }
+    }
+
     pub fn repeat(&self) -> RepeatMode {
         self.repeat
     }
@@ -103,5 +116,20 @@ mod tests {
         queue.cycle_repeat(); // Off -> All
         queue.jump_to(1);
         assert_eq!(queue.next(), Some(0));
+    }
+
+    #[test]
+    fn peek_next_looks_ahead_without_moving() {
+        let mut queue = Queue::new(3);
+        queue.jump_to(0);
+        assert_eq!(queue.peek_next(), Some(1));
+        assert_eq!(queue.current(), Some(0));
+
+        queue.jump_to(2);
+        assert_eq!(queue.peek_next(), None);
+        queue.cycle_repeat(); // All
+        assert_eq!(queue.peek_next(), Some(0));
+        queue.cycle_repeat(); // One
+        assert_eq!(queue.peek_next(), Some(2));
     }
 }
