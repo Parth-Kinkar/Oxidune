@@ -12,6 +12,7 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 - [x] **Lyrics**: `.lrc` parser, line highlighting, local `.lrc` first, then fetched from [LRCLIB](https://lrclib.net) and cached next to the song, `--offline` flag
 - [x] **Gapless playback**: preload the next track so albums flow without a gap
 - [x] **Search / filter**: press `/` and type to narrow the list
+- [x] **Lyrics lookup fixes**: retry when LRCLIB is busy, looser searches for titles with "(feat. …)" / "(From …)" and multi-artist tags, and the lyrics panel tells "offline", "network error", and "not in LRCLIB" apart
 - [x] **Shuffle**: `z` toggles a random order; every track plays once before it ends
 
 ## Next up
@@ -22,7 +23,6 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 
 ## Lyrics follow-ups
 
-- [ ] Tell "offline / network error" apart from "not in LRCLIB" in the lyrics panel
 - [ ] Scrolling for plain (unsynced) lyrics
 - [ ] Config option for online lookups, replacing the `--offline` flag
 

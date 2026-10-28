@@ -126,12 +126,12 @@ impl Queue {
     fn reshuffle(&mut self, first: Option<usize>) {
         self.order.sort_unstable();
         self.rng.shuffle(&mut self.order);
-        if let Some(track) = first {
-            if let Some(position) = self.order.iter().position(|&t| t == track) {
-                self.order.swap(0, position);
-                self.cursor = Some(0);
-                return;
-            }
+        if let Some(track) = first
+            && let Some(position) = self.order.iter().position(|&t| t == track)
+        {
+            self.order.swap(0, position);
+            self.cursor = Some(0);
+            return;
         }
         self.cursor = None;
     }

@@ -4,13 +4,29 @@ use std::thread;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use crate::domain::{Lyrics, Track};
+use crate::error::Error;
 
 use super::lrclib::LrclibClient;
 use super::store::LyricsStore;
 
 pub enum LyricsEvent {
-    Loaded { path: PathBuf, lyrics: Lyrics },
-    Missing { path: PathBuf },
+    Loaded {
+        path: PathBuf,
+        lyrics: Lyrics,
+    },
+    /// LRCLIB answered, but has no lyrics for this track.
+    Missing {
+        path: PathBuf,
+    },
+    /// No local .lrc file, and online lookups are turned off.
+    Offline {
+        path: PathBuf,
+    },
+    /// Couldn't ask LRCLIB (no network, or the service is down).
+    Failed {
+        path: PathBuf,
+        reason: String,
+    },
 }
 
 /// Finds lyrics for tracks on a background thread.
@@ -56,19 +72,28 @@ fn resolve(track: &Track, online: bool, client: &LrclibClient) -> LyricsEvent {
         return LyricsEvent::Loaded { path, lyrics };
     }
 
-    if online {
-        match client.fetch(track) {
-            Ok(Some(text)) => {
-                let lyrics = Lyrics::parse(&text);
-                if !lyrics.is_empty() {
-                    LyricsStore::save(&path, &text);
-                    return LyricsEvent::Loaded { path, lyrics };
-                }
-            }
-            Ok(None) => {}
-            Err(err) => eprintln!("lyrics lookup failed: {err}"),
-        }
+    if !online {
+        return LyricsEvent::Offline { path };
     }
 
-    LyricsEvent::Missing { path }
+    // Errors go to the lyrics panel, never to stderr: printing would draw
+    // over the TUI.
+    match client.fetch(track) {
+        Ok(Some(text)) => {
+            let lyrics = Lyrics::parse(&text);
+            if lyrics.is_empty() {
+                return LyricsEvent::Missing { path };
+            }
+            LyricsStore::save(&path, &text);
+            LyricsEvent::Loaded { path, lyrics }
+        }
+        Ok(None) => LyricsEvent::Missing { path },
+        Err(err) => LyricsEvent::Failed {
+            path,
+            reason: match err {
+                Error::Lyrics(message) => message,
+                other => other.to_string(),
+            },
+        },
+    }
 }

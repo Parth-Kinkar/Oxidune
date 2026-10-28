@@ -3,8 +3,8 @@ use std::time::Duration;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::text::{Line, Text};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 
 use crate::app::{App, LyricsState};
 use crate::domain::Lyrics;
@@ -18,14 +18,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         LyricsState::None => {}
         LyricsState::Loading => render_message(frame, inner, "Loading lyrics…"),
         LyricsState::Missing => render_message(frame, inner, "No lyrics found"),
+        LyricsState::Offline => render_message(frame, inner, "No local lyrics (offline mode)"),
+        LyricsState::Failed(reason) => {
+            let text = Text::from(vec![
+                Line::from("Couldn't reach LRCLIB, try again later"),
+                Line::from(reason.as_str()).italic(),
+            ]);
+            render_message(frame, inner, text);
+        }
         LyricsState::Ready(lyrics) => render_lines(frame, inner, lyrics, app.position()),
     }
 }
 
-fn render_message(frame: &mut Frame, area: Rect, text: &str) {
+fn render_message<'a>(frame: &mut Frame, area: Rect, text: impl Into<Text<'a>>) {
     let paragraph = Paragraph::new(text)
         .dark_gray()
-        .alignment(Alignment::Center);
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, area);
 }
 

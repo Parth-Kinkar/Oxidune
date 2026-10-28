@@ -28,7 +28,12 @@ pub enum LyricsState {
     None,
     Loading,
     Ready(Lyrics),
+    /// LRCLIB has no lyrics for this track.
     Missing,
+    /// No local .lrc file and online lookups are off.
+    Offline,
+    /// The lookup failed (network or service error), with the reason.
+    Failed(String),
 }
 
 /// Application state and input handling. Draws nothing, decodes nothing.
@@ -392,6 +397,12 @@ impl App {
                 }
                 LyricsEvent::Missing { path } if self.is_current(&path) => {
                     self.lyrics = LyricsState::Missing;
+                }
+                LyricsEvent::Offline { path } if self.is_current(&path) => {
+                    self.lyrics = LyricsState::Offline;
+                }
+                LyricsEvent::Failed { path, reason } if self.is_current(&path) => {
+                    self.lyrics = LyricsState::Failed(reason);
                 }
                 _ => {} // a result for a track we've already moved past
             }
