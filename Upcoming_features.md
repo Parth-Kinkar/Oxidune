@@ -17,6 +17,8 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 ## Next up
 
 - [ ] **Bit-perfect output**: open an ALSA `hw:` device directly, with device selection
+- [ ] **Mouse support**: click to select and play tracks, click the progress bar to seek, scroll lists
+- [ ] **Up next / queue view**: see which songs play next (especially with shuffle on), and edit the queue: reorder, remove, or pick what plays next
 
 ## Lyrics follow-ups
 
@@ -36,6 +38,7 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 - [ ] Config file (TOML): music directory, output device, keybinds
 - [ ] Library cache so launches stay fast with large libraries
 - [ ] Remember last queue and position
+- [ ] Collapsible panels: some sections (e.g. lyrics, queue) only show up when clicked or selected
 
 ## Integration and release
 
