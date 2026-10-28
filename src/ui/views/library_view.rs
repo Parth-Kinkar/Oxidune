@@ -40,13 +40,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         format!(" Library ({}/{}) ", app.visible().len(), tracks.len())
     };
 
+    let block = Block::bordered().title(title);
+    app.regions_mut().library = Some(block.inner(list_area));
+
     let list = List::new(items)
-        .block(Block::bordered().title(title))
+        .block(block)
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED));
 
     frame.render_stateful_widget(list, list_area, app.list_state_mut());
 
     if let Some(search_area) = search_area {
+        app.regions_mut().search = Some(search_area);
         render_search(frame, search_area, app);
     }
 }

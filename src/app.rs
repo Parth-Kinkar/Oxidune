@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::audio::{Command, Event as PlayerEvent, Player, StreamSpec};
 use crate::domain::{Filter, Lyrics, Queue, Track};
@@ -6,15 +6,20 @@ use crate::error::Result;
 use crate::library::Library;
 use crate::lyrics::{LyricsEvent, LyricsService};
 use crate::ui;
+use crate::ui::mouse::{self, DoubleClick, Regions};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{
-    self, Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+    self, Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
+    MouseEvent, MouseEventKind,
 };
+use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::path::Path;
 
 const SEEK_STEP: Duration = Duration::from_secs(5);
 const INPUT_POLL: Duration = Duration::from_millis(50);
+/// Rows the list moves per scroll-wheel notch.
+const SCROLL_STEP: u16 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackState {
@@ -55,6 +60,12 @@ pub struct App {
     /// is a position in here, not a library index.
     visible: Vec<usize>,
     searching: bool,
+    /// Where each panel was drawn last frame, for mouse clicks.
+    regions: Regions,
+    double_click: DoubleClick,
+    /// While dragging on the progress bar: the bar, and where the drag points.
+    /// The seek is sent once, on release.
+    seek_drag: Option<(Rect, Duration)>,
 }
 
 impl App {
@@ -82,6 +93,9 @@ impl App {
             filter: Filter::default(),
             visible,
             searching: false,
+            regions: Regions::default(),
+            double_click: DoubleClick::default(),
+            seek_drag: None,
         }
     }
 
@@ -109,8 +123,9 @@ impl App {
         self.state
     }
 
+    /// Playback position, or where the user is dragging the progress bar to.
     pub fn position(&self) -> Duration {
-        self.position
+        self.seek_drag.map_or(self.position, |(_, target)| target)
     }
 
     pub fn spec(&self) -> Option<StreamSpec> {
@@ -119,6 +134,10 @@ impl App {
 
     pub fn message(&self) -> Option<&str> {
         self.message.as_deref()
+    }
+
+    pub fn regions_mut(&mut self) -> &mut Regions {
+        &mut self.regions
     }
 
     pub fn list_state_mut(&mut self) -> &mut ListState {
@@ -145,17 +164,24 @@ impl App {
 
     // ---- input ----
 
+    /// Waits briefly for input, then handles everything that's queued.
+    /// Mouse movement can produce bursts of events; taking them all before
+    /// the next redraw keeps the UI responsive.
     fn handle_input(&mut self) -> Result<()> {
-        if event::poll(INPUT_POLL)? {
-            if let TermEvent::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
+        let mut timeout = INPUT_POLL;
+        while event::poll(timeout)? {
+            match event::read()? {
+                TermEvent::Key(key) if key.kind == KeyEventKind::Press => {
                     if self.searching {
                         self.on_search_key(key);
                     } else {
                         self.on_key(key.code);
                     }
                 }
+                TermEvent::Mouse(mouse) => self.on_mouse(mouse),
+                _ => {}
             }
+            timeout = Duration::ZERO;
         }
         Ok(())
     }
@@ -201,6 +227,108 @@ impl App {
                 self.refresh_filter();
             }
             _ => {}
+        }
+    }
+
+    // ---- mouse ----
+
+    fn on_mouse(&mut self, mouse: MouseEvent) {
+        let (column, row) = (mouse.column, mouse.row);
+        let over_library = mouse::hit(self.regions.library, column, row);
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.on_click(column, row),
+            MouseEventKind::Drag(MouseButton::Left) => self.drag_seek(column),
+            MouseEventKind::Up(MouseButton::Left) => self.finish_seek_drag(),
+            MouseEventKind::ScrollDown if over_library => {
+                self.list_state.scroll_down_by(SCROLL_STEP)
+            }
+            MouseEventKind::ScrollUp if over_library => self.list_state.scroll_up_by(SCROLL_STEP),
+            _ => {}
+        }
+    }
+
+    fn on_click(&mut self, column: u16, row: u16) {
+        let regions = self.regions;
+
+        if mouse::hit(regions.search, column, row) {
+            self.searching = true;
+            return;
+        }
+        // Clicking anywhere else finishes typing a search, like Enter does.
+        self.searching = false;
+
+        let list_item = regions
+            .library
+            .and_then(|area| mouse::item_at(area, self.list_state.offset(), column, row));
+        let lyric_line = regions
+            .lyrics
+            .and_then(|(area, top)| mouse::item_at(area, top, column, row));
+
+        if let Some(bar) = regions
+            .progress
+            .filter(|&bar| mouse::hit(Some(bar), column, row))
+        {
+            self.start_seek_drag(bar, column);
+        } else if let Some(item) = list_item {
+            self.click_list_item(item);
+        } else if let Some(line) = lyric_line {
+            self.seek_to_lyric(line);
+        } else if mouse::hit(regions.now_playing, column, row)
+            && self.state != PlaybackState::Stopped
+        {
+            self.toggle_pause();
+        }
+    }
+
+    /// Click selects; a double click plays.
+    fn click_list_item(&mut self, item: usize) {
+        if item >= self.visible.len() {
+            return; // empty space below the last track
+        }
+        self.list_state.select(Some(item));
+        if self.double_click.click(item, Instant::now()) {
+            self.play_selected();
+        }
+    }
+
+    /// Jumps to a line of synced lyrics.
+    fn seek_to_lyric(&mut self, line: usize) {
+        let LyricsState::Ready(lyrics) = &self.lyrics else {
+            return;
+        };
+        if let Some(time) = lyrics.lines().get(line).and_then(|line| line.time) {
+            self.seek_to(time);
+        }
+    }
+
+    fn start_seek_drag(&mut self, bar: Rect, column: u16) {
+        if self.state == PlaybackState::Stopped {
+            return;
+        }
+        self.seek_drag = Some((bar, Duration::ZERO));
+        self.drag_seek(column);
+    }
+
+    fn drag_seek(&mut self, column: u16) {
+        let Some((bar, _)) = self.seek_drag else {
+            return;
+        };
+        let Some(track) = self.now_playing() else {
+            self.seek_drag = None;
+            return;
+        };
+        let limit = track.duration.saturating_sub(Duration::from_secs(1));
+        let target = track
+            .duration
+            .mul_f64(mouse::fraction_at(bar, column))
+            .min(limit);
+        self.seek_drag = Some((bar, target));
+    }
+
+    fn finish_seek_drag(&mut self) {
+        if let Some((_, target)) = self.seek_drag.take() {
+            self.seek_to(target);
         }
     }
 

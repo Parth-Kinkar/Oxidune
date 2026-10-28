@@ -9,13 +9,25 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 use crate::app::{App, LyricsState};
 use crate::domain::Lyrics;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered().title(" Lyrics ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    match app.lyrics() {
-        LyricsState::None => {}
+    let top = match app.lyrics() {
+        LyricsState::Ready(lyrics) => Some(render_lines(frame, inner, lyrics, app.position())),
+        other => {
+            render_status(frame, inner, other);
+            None
+        }
+    };
+    app.regions_mut().lyrics = top.map(|top| (inner, top));
+}
+
+/// Everything except actual lyrics: loading, missing, offline, failed.
+fn render_status(frame: &mut Frame, inner: Rect, state: &LyricsState) {
+    match state {
+        LyricsState::None | LyricsState::Ready(_) => {}
         LyricsState::Loading => render_message(frame, inner, "Loading lyrics…"),
         LyricsState::Missing => render_message(frame, inner, "No lyrics found"),
         LyricsState::Offline => render_message(frame, inner, "No local lyrics (offline mode)"),
@@ -26,7 +38,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ]);
             render_message(frame, inner, text);
         }
-        LyricsState::Ready(lyrics) => render_lines(frame, inner, lyrics, app.position()),
     }
 }
 
@@ -38,7 +49,9 @@ fn render_message<'a>(frame: &mut Frame, area: Rect, text: impl Into<Text<'a>>) 
     frame.render_widget(paragraph, area);
 }
 
-fn render_lines(frame: &mut Frame, area: Rect, lyrics: &Lyrics, position: Duration) {
+/// Draws the lyrics, one line per row. Returns the index of the line on the
+/// first row, so a click on a row can be mapped back to its line.
+fn render_lines(frame: &mut Frame, area: Rect, lyrics: &Lyrics, position: Duration) -> usize {
     let current = lyrics.current_index(position);
     let height = area.height as usize;
 
@@ -66,4 +79,5 @@ fn render_lines(frame: &mut Frame, area: Rect, lyrics: &Lyrics, position: Durati
         .collect();
 
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
+    top
 }

@@ -14,6 +14,7 @@ TuneTerm plays the files you already own: FLAC, ALAC (`.m4a`), WAV, MP3, and Ogg
 - Search: press `/` and type to filter by artist, title, or album
 - Queue with repeat modes (off / all / one) and shuffle
 - Pause, resume, seek, next, previous
+- Mouse support: click, double-click, scroll, and drag to seek (see [Mouse](#mouse))
 - Synced lyrics, highlighted line by line as the song plays (see [Lyrics](#lyrics))
 - Playback runs on its own thread, so the UI never blocks audio
 
@@ -37,6 +38,7 @@ If you don't pass a directory, TuneTerm scans the current one.
 | Flag        | Effect                                                    |
 |-------------|-----------------------------------------------------------|
 | `--offline` | Never contact the network (local `.lrc` files still work) |
+| `--no-mouse` | Leave the mouse to the terminal (normal text selection)  |
 
 ## Keys
 
@@ -55,6 +57,19 @@ If you don't pass a directory, TuneTerm scans the current one.
 | `l`              | Show / hide lyrics panel    |
 | `s`              | Stop                        |
 | `q`              | Quit                        |
+
+## Mouse
+
+| Where                 | Action                                  |
+|-----------------------|-----------------------------------------|
+| Library list          | Click to select, double-click to play   |
+| Scroll wheel on list  | Move through the list                   |
+| Progress bar          | Click or drag to seek                   |
+| Synced lyrics line    | Click to jump to that line              |
+| Now Playing line      | Click to pause / resume                 |
+| Search box            | Click to edit the search                |
+
+While TuneTerm uses the mouse, most terminals still let you select text by holding **Shift** while dragging. Run with `--no-mouse` to turn mouse support off.
 
 ## Lyrics
 

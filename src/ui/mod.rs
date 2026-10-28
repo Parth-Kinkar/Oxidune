@@ -1,3 +1,4 @@
+pub mod mouse;
 mod views;
 
 use ratatui::Frame;
@@ -13,6 +14,9 @@ const SEARCH_HELP: &str =
     " type to filter · ↑↓ select · Backspace delete · Enter keep filter · Esc clear";
 
 pub fn render(frame: &mut Frame, app: &mut App) {
+    // Each view records where it draws; panels not drawn this frame stay empty.
+    *app.regions_mut() = mouse::Regions::default();
+
     let [main, now_playing, help] = Layout::vertical([
         Constraint::Min(3),
         Constraint::Length(4),

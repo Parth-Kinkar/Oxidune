@@ -6,12 +6,21 @@ use ratatui::widgets::{Block, Gauge, Paragraph};
 use crate::app::{App, PlaybackState};
 use crate::domain::format_duration;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::bordered().title(" Now Playing ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let [info, bar] = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(inner);
+
+    if app.now_playing().is_some() {
+        let regions = app.regions_mut();
+        regions.now_playing = Some(info);
+        regions.progress = Some(bar);
+    }
+    if app.message().is_some() {
+        app.regions_mut().progress = None; // the bar shows the error instead
+    }
 
     let modes = format!(
         "repeat: {}  ·  shuffle: {}",
