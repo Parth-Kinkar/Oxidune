@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepeatMode {
     Off,
@@ -17,9 +19,15 @@ impl RepeatMode {
 
 /// The playback order: which library track plays after which.
 /// Stores indices into the library, so it knows nothing about Track itself.
+///
+/// Songs removed from the queue are simply left out of `order`; picking one
+/// from the library again puts it back.
 pub struct Queue {
     order: Vec<usize>,
     cursor: Option<usize>, // position within `order`
+    /// Tracks added with "play next" that haven't played yet. They sit right
+    /// after the current track and stay there when the order is rebuilt.
+    pinned: HashSet<usize>,
     repeat: RepeatMode,
     shuffle: bool,
     rng: Rng,
@@ -34,6 +42,7 @@ impl Queue {
         Self {
             order: (0..track_count).collect(),
             cursor: None,
+            pinned: HashSet::new(),
             repeat: RepeatMode::Off,
             shuffle: false,
             rng,
@@ -45,14 +54,45 @@ impl Queue {
         self.cursor.map(|c| self.order[c])
     }
 
+    /// The tracks that will play after the current one, in order.
+    /// Empty when nothing is playing.
+    pub fn upcoming(&self) -> &[usize] {
+        match self.cursor {
+            Some(cursor) => &self.order[cursor + 1..],
+            None => &[],
+        }
+    }
+
+    /// True if the track was added with "play next" and hasn't played yet.
+    pub fn is_pinned(&self, track: usize) -> bool {
+        self.pinned.contains(&track)
+    }
+
     /// Makes `track` the current one. In shuffle mode the rest of the
     /// queue is reshuffled after it, so every other track still comes up.
+    /// A track that was removed from the queue rejoins it.
     pub fn jump_to(&mut self, track: usize) {
         if self.shuffle {
             self.reshuffle(Some(track));
-        } else {
-            self.cursor = self.order.iter().position(|&t| t == track);
+            return;
         }
+        self.pinned.remove(&track);
+        let pinned = self.pinned_in_order(None);
+        let position = match self.order.iter().position(|&t| t == track) {
+            Some(position) => position,
+            None => {
+                // Put it back roughly where it sits in the library.
+                let position = self
+                    .order
+                    .iter()
+                    .position(|&t| t > track)
+                    .unwrap_or(self.order.len());
+                self.order.insert(position, track);
+                position
+            }
+        };
+        self.cursor = Some(position);
+        self.put_after_current(pinned);
     }
 
     /// Manual skip forward. Returns None if there is nothing after this track.
@@ -66,6 +106,7 @@ impl Queue {
             return None;
         };
         self.cursor = Some(target);
+        self.settle();
         self.current()
     }
 
@@ -100,6 +141,77 @@ impl Queue {
         }
     }
 
+    // ---- editing what comes next ----
+    //
+    // `index` below is a position in `upcoming()`: 0 is the next track.
+
+    /// Puts `track` right after the current track, behind any earlier
+    /// "play next" picks. Does nothing if nothing is playing or it's
+    /// the current track.
+    pub fn play_next(&mut self, track: usize) {
+        let Some(mut cursor) = self.cursor else {
+            return;
+        };
+        if self.order[cursor] == track {
+            return;
+        }
+        if let Some(position) = self.order.iter().position(|&t| t == track) {
+            self.order.remove(position);
+            if position < cursor {
+                cursor -= 1;
+            }
+        }
+        let mut at = cursor + 1;
+        while at < self.order.len() && self.pinned.contains(&self.order[at]) {
+            at += 1;
+        }
+        self.order.insert(at, track);
+        self.pinned.insert(track);
+        self.cursor = Some(cursor);
+    }
+
+    /// Removes an upcoming track from the queue. Returns the removed track.
+    pub fn remove_upcoming(&mut self, index: usize) -> Option<usize> {
+        let position = self.cursor? + 1 + index;
+        if position >= self.order.len() {
+            return None;
+        }
+        let track = self.order.remove(position);
+        self.pinned.remove(&track);
+        Some(track)
+    }
+
+    /// Moves an upcoming track one place earlier or later.
+    /// Returns its new index, or None if it can't move that way.
+    pub fn move_upcoming(&mut self, index: usize, later: bool) -> Option<usize> {
+        let count = self.upcoming().len();
+        let target = if later {
+            index + 1
+        } else {
+            index.checked_sub(1)?
+        };
+        if index >= count || target >= count {
+            return None;
+        }
+        let first = self.cursor? + 1;
+        self.order.swap(first + index, first + target);
+        Some(target)
+    }
+
+    /// Plays an upcoming track now. The ones before it are passed over
+    /// (`previous` still goes back to them). Returns the new current track.
+    pub fn skip_to_upcoming(&mut self, index: usize) -> Option<usize> {
+        let position = self.cursor? + 1 + index;
+        if position >= self.order.len() {
+            return None;
+        }
+        self.cursor = Some(position);
+        self.settle();
+        self.current()
+    }
+
+    // ---- modes ----
+
     pub fn repeat(&self) -> RepeatMode {
         self.repeat
     }
@@ -108,32 +220,21 @@ impl Queue {
         self.shuffle
     }
 
-    /// Turns shuffle on or off. The current track keeps playing either way:
-    /// on, it becomes the first of a new random order; off, the queue goes
-    /// back to library order from where that track sits.
+    /// Turns shuffle on or off for the songs still in the queue. The current
+    /// track keeps playing either way, and "play next" picks stay next.
+    /// On: everything else gets a new random order. Off: library order,
+    /// carrying on from the current track.
     pub fn toggle_shuffle(&mut self) {
         self.shuffle = !self.shuffle;
         let current = self.current();
         if self.shuffle {
             self.reshuffle(current);
         } else {
+            let pinned = self.pinned_in_order(current);
             self.order.sort_unstable();
             self.cursor = current.and_then(|t| self.order.iter().position(|&o| o == t));
+            self.put_after_current(pinned);
         }
-    }
-
-    /// Random order with `first` (if any) at the front, cursor on it.
-    fn reshuffle(&mut self, first: Option<usize>) {
-        self.order.sort_unstable();
-        self.rng.shuffle(&mut self.order);
-        if let Some(track) = first
-            && let Some(position) = self.order.iter().position(|&t| t == track)
-        {
-            self.order.swap(0, position);
-            self.cursor = Some(0);
-            return;
-        }
-        self.cursor = None;
     }
 
     pub fn cycle_repeat(&mut self) {
@@ -142,6 +243,61 @@ impl Queue {
             RepeatMode::All => RepeatMode::One,
             RepeatMode::One => RepeatMode::Off,
         };
+    }
+
+    // ---- internal ----
+
+    /// New order: `first` (if any) as the current track, then the pinned
+    /// tracks as they were, then everything else shuffled.
+    fn reshuffle(&mut self, first: Option<usize>) {
+        let pinned: Vec<usize> = self.pinned_in_order(first);
+        let mut rest: Vec<usize> = self
+            .order
+            .iter()
+            .copied()
+            .filter(|&t| Some(t) != first && !self.pinned.contains(&t))
+            .collect();
+        rest.sort_unstable(); // so the result depends only on the rng
+        self.rng.shuffle(&mut rest);
+
+        self.order.clear();
+        self.cursor = first.map(|track| {
+            self.order.push(track);
+            0
+        });
+        self.order.extend(pinned);
+        self.order.extend(rest);
+        self.settle();
+    }
+
+    /// Moves `pinned` (in that order) to just after the current track.
+    fn put_after_current(&mut self, pinned: Vec<usize>) {
+        let Some(current) = self.current() else {
+            return;
+        };
+        self.order.retain(|t| !pinned.contains(t));
+        let cursor = self.order.iter().position(|&t| t == current).unwrap_or(0);
+        self.cursor = Some(cursor);
+        self.order.splice(cursor + 1..cursor + 1, pinned);
+    }
+
+    /// Pinned tracks in queue order, leaving out `except`.
+    fn pinned_in_order(&self, except: Option<usize>) -> Vec<usize> {
+        self.order
+            .iter()
+            .copied()
+            .filter(|&t| self.pinned.contains(&t) && Some(t) != except)
+            .collect()
+    }
+
+    /// After the cursor moves forward: anything at or before it has
+    /// played or been passed over, so it's no longer a "play next" pick.
+    fn settle(&mut self) {
+        if let Some(cursor) = self.cursor {
+            for track in &self.order[..=cursor] {
+                self.pinned.remove(track);
+            }
+        }
     }
 }
 
@@ -193,6 +349,123 @@ mod tests {
             played.push(track);
         }
         played
+    }
+
+    fn playing(track_count: usize, current: usize) -> Queue {
+        let mut queue = shuffled_queue(track_count);
+        queue.jump_to(current);
+        queue
+    }
+
+    #[test]
+    fn upcoming_lists_what_follows_the_current_track() {
+        let queue = playing(5, 2);
+        assert_eq!(queue.upcoming(), &[3, 4]);
+        assert_eq!(shuffled_queue(5).upcoming(), &[] as &[usize]);
+    }
+
+    #[test]
+    fn play_next_goes_after_current_in_the_order_picked() {
+        let mut queue = playing(10, 2);
+        queue.play_next(7);
+        queue.play_next(5);
+        queue.play_next(0); // already played: moves forward
+        assert_eq!(queue.current(), Some(2));
+        assert_eq!(&queue.upcoming()[..4], &[7, 5, 0, 3]);
+        assert!(queue.is_pinned(7));
+
+        queue.play_next(2); // the current track: nothing happens
+        assert_eq!(queue.current(), Some(2));
+
+        queue.next();
+        assert_eq!(queue.current(), Some(7));
+        assert!(!queue.is_pinned(7), "played tracks are no longer pinned");
+    }
+
+    #[test]
+    fn play_next_does_nothing_when_nothing_is_playing() {
+        let mut queue = shuffled_queue(3);
+        queue.play_next(1);
+        assert_eq!(queue.current(), None);
+        assert!(!queue.is_pinned(1));
+    }
+
+    #[test]
+    fn removed_tracks_stay_removed_through_shuffle_toggles() {
+        let mut queue = playing(10, 0);
+        assert_eq!(queue.remove_upcoming(2), Some(3));
+        assert_eq!(queue.remove_upcoming(0), Some(1));
+        assert_eq!(queue.remove_upcoming(99), None);
+
+        queue.toggle_shuffle();
+        let mut played = play_through(&mut queue);
+        played.sort();
+        assert_eq!(played, vec![0, 2, 4, 5, 6, 7, 8, 9]);
+
+        queue.jump_to(0);
+        queue.toggle_shuffle(); // off again
+        assert_eq!(play_through(&mut queue), vec![0, 2, 4, 5, 6, 7, 8, 9]);
+    }
+
+    #[test]
+    fn a_removed_track_rejoins_when_picked() {
+        let mut queue = playing(6, 0);
+        queue.remove_upcoming(2); // track 3
+        queue.jump_to(3);
+        assert_eq!(queue.current(), Some(3));
+        assert_eq!(queue.upcoming(), &[4, 5]);
+
+        queue.toggle_shuffle();
+        queue.remove_upcoming(0);
+        let removed: Vec<usize> = (0..6).filter(|t| !queue.order.contains(t)).collect();
+        queue.jump_to(removed[0]);
+        assert_eq!(queue.current(), Some(removed[0]));
+    }
+
+    #[test]
+    fn play_next_picks_stay_next_after_shuffle_toggles() {
+        let mut queue = playing(20, 4);
+        queue.play_next(15);
+        queue.play_next(9);
+
+        queue.toggle_shuffle();
+        assert_eq!(queue.current(), Some(4));
+        assert_eq!(&queue.upcoming()[..2], &[15, 9]);
+
+        queue.toggle_shuffle();
+        assert_eq!(queue.current(), Some(4));
+        assert_eq!(&queue.upcoming()[..3], &[15, 9, 5]);
+    }
+
+    #[test]
+    fn picking_another_track_keeps_play_next_picks_next() {
+        let mut queue = playing(10, 1);
+        queue.play_next(8);
+        queue.jump_to(5);
+        assert_eq!(&queue.upcoming()[..2], &[8, 6]);
+    }
+
+    #[test]
+    fn move_upcoming_swaps_and_stops_at_the_ends() {
+        let mut queue = playing(5, 0); // upcoming: 1 2 3 4
+        assert_eq!(queue.move_upcoming(0, true), Some(1));
+        assert_eq!(queue.upcoming(), &[2, 1, 3, 4]);
+        assert_eq!(queue.move_upcoming(3, false), Some(2));
+        assert_eq!(queue.upcoming(), &[2, 1, 4, 3]);
+        assert_eq!(queue.move_upcoming(0, false), None);
+        assert_eq!(queue.move_upcoming(3, true), None);
+        assert_eq!(queue.move_upcoming(9, true), None);
+    }
+
+    #[test]
+    fn skip_to_upcoming_jumps_and_previous_goes_back() {
+        let mut queue = playing(6, 0);
+        queue.play_next(4);
+        assert_eq!(queue.skip_to_upcoming(2), Some(2)); // upcoming was 4 1 2 3 5
+        assert!(!queue.is_pinned(4), "passed-over picks are unpinned");
+        assert_eq!(queue.upcoming(), &[3, 5]);
+        assert_eq!(queue.previous(), Some(1));
+        assert_eq!(queue.skip_to_upcoming(99), None);
     }
 
     #[test]

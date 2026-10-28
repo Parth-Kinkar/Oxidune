@@ -110,6 +110,7 @@ enum Step {
 /// One continuous audio stream: a decoder feeding an output.
 /// Several tracks can pass through the same session when they share a format.
 struct Session {
+    path: PathBuf, // the track playing now
     decoder: Box<dyn Decoder>,
     output: Box<dyn AudioOutput>,
     pending: Option<Vec<f32>>, // decoded but not yet accepted by the output
@@ -129,6 +130,7 @@ impl Session {
         let decoder = SymphoniaDecoder::open(path)?;
         let output = CpalOutput::open(decoder.spec())?;
         Ok(Self {
+            path: path.to_path_buf(),
             decoder: Box::new(decoder),
             output: Box::new(output),
             pending: None,
@@ -169,6 +171,7 @@ impl Session {
             .is_some_and(|b| self.output.position() >= b.at);
         if crossed {
             if let Some(boundary) = self.boundary.take() {
+                self.path = boundary.path.clone();
                 self.track_start = boundary.at;
                 self.offset = Duration::ZERO;
                 return Ok(Step::Advanced(boundary.path));
@@ -234,12 +237,19 @@ impl Session {
         true
     }
 
-    fn set_next(&mut self, path: Option<&Path>) {
-        if self.boundary.is_some() {
-            return; // already past the end of this track; the UI will send a fresh one
+    fn set_next(&mut self, path: Option<&Path>) -> Result<()> {
+        if let Some(boundary) = &self.boundary {
+            if Some(boundary.path.as_path()) == path {
+                return Ok(()); // already switched to the right track
+            }
+            // We already started decoding a track that's no longer next
+            // (the queue changed in the last moments of this song).
+            // Go back to the current song, right where it is.
+            let position = self.position();
+            self.seek(position)?;
         }
         if self.next.as_ref().map(|n| n.path.as_path()) == path {
-            return; // already prepared
+            return Ok(()); // already prepared
         }
         self.next = path.and_then(|p| {
             let decoder = SymphoniaDecoder::open(p).ok()?;
@@ -248,6 +258,24 @@ impl Session {
                 decoder,
             })
         });
+        Ok(())
+    }
+
+    /// Takes back an early switch to the next track: the decoder had moved
+    /// on, but playback hadn't reached it yet. The next track is prepared
+    /// again so gapless playback still works.
+    fn undo_switch(&mut self) -> Result<()> {
+        let Some(boundary) = self.boundary.take() else {
+            return Ok(());
+        };
+        self.decoder = Box::new(SymphoniaDecoder::open(&self.path)?);
+        self.next = SymphoniaDecoder::open(&boundary.path)
+            .ok()
+            .map(|decoder| Upcoming {
+                path: boundary.path,
+                decoder,
+            });
+        Ok(())
     }
 
     fn set_paused(&mut self, paused: bool) {
@@ -256,9 +284,7 @@ impl Session {
     }
 
     fn seek(&mut self, to: Duration) -> Result<()> {
-        if self.boundary.is_some() {
-            return Ok(()); // already decoding the next track; the UI hasn't caught up yet
-        }
+        self.undo_switch()?; // seeking within the current track, not the next
         self.decoder.seek(to)?;
 
         // Reopen the output so audio buffered before the seek is discarded.
@@ -305,8 +331,12 @@ impl Engine {
                 Err(err) => self.fail(err),
             },
             Command::SetNext(path) => {
-                if let Some(session) = self.session.as_mut() {
-                    session.set_next(path.as_deref());
+                let result = self
+                    .session
+                    .as_mut()
+                    .map(|session| session.set_next(path.as_deref()));
+                if let Some(Err(err)) = result {
+                    self.fail(err);
                 }
             }
             Command::Pause => {

@@ -1,10 +1,11 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
-use crate::app::App;
+use crate::app::{App, Focus, SideTab};
+use crate::ui::focus_style;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let show_search = app.is_searching() || !app.filter_query().is_empty();
@@ -40,12 +41,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         format!(" Library ({}/{}) ", app.visible().len(), tracks.len())
     };
 
-    let block = Block::bordered().title(title);
+    // Only worth highlighting focus when there's another panel to focus.
+    let has_focus = app.focus() == Focus::Library;
+    let show_focus = has_focus && app.side_tab() == Some(SideTab::Queue);
+    let block = Block::bordered()
+        .title(title)
+        .border_style(focus_style(show_focus));
     app.regions_mut().library = Some(block.inner(list_area));
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+    let list = List::new(items).block(block).highlight_style(if has_focus {
+        Style::new().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::new().fg(Color::Cyan)
+    });
 
     frame.render_stateful_widget(list, list_area, app.list_state_mut());
 

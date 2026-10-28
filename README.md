@@ -13,6 +13,7 @@ TuneTerm plays the files you already own: FLAC, ALAC (`.m4a`), WAV, MP3, and Ogg
 - Library scanning with tags read via [lofty](https://crates.io/crates/lofty)
 - Search: press `/` and type to filter by artist, title, or album
 - Queue with repeat modes (off / all / one) and shuffle
+- Up next view: see what plays next and edit it (play next, reorder, remove)
 - Pause, resume, seek, next, previous
 - Mouse support: click, double-click, scroll, and drag to seek (see [Mouse](#mouse))
 - Synced lyrics, highlighted line by line as the song plays (see [Lyrics](#lyrics))
@@ -47,6 +48,7 @@ If you don't pass a directory, TuneTerm scans the current one.
 | `↑` / `k`        | Move selection up           |
 | `↓` / `j`        | Move selection down         |
 | `Enter`          | Play selected track         |
+| `a`              | Play selected track next    |
 | `/`              | Search: type to filter list |
 | `Esc`            | Clear search                |
 | `Space`          | Pause / resume              |
@@ -54,9 +56,26 @@ If you don't pass a directory, TuneTerm scans the current one.
 | `←` / `→`        | Seek back / forward 5s      |
 | `r`              | Cycle repeat mode           |
 | `z`              | Toggle shuffle              |
-| `l`              | Show / hide lyrics panel    |
+| `l`              | Show / hide lyrics tab      |
+| `u`              | Show / hide Up next tab     |
+| `Tab`            | Switch focus: library / Up next |
 | `s`              | Stop                        |
 | `q`              | Quit                        |
+
+## Up next
+
+The right-hand panel has two tabs, **Lyrics** and **Up next**. Up next lists the songs that will play after the current one, in the real order, so with shuffle on you can see exactly what's coming. Songs added with `a` are marked `+`.
+
+Press `Tab` (or click the list) to focus Up next, then:
+
+| Key            | Action                                  |
+|----------------|-----------------------------------------|
+| `↑` / `↓`, `j` / `k` | Select a song                     |
+| `Enter`        | Play it now (songs before it are skipped) |
+| `J` / `K`      | Move it down / up                       |
+| `d` / `Delete` | Remove it from the queue                |
+
+Removed songs stay out of the queue, also when you toggle shuffle; picking one from the library brings it back. Songs added with `a` stay at the top, in the order you added them, when the order is shuffled; a dim `shuffled ↓` line shows where the shuffled part starts.
 
 ## Mouse
 
@@ -68,6 +87,8 @@ If you don't pass a directory, TuneTerm scans the current one.
 | Synced lyrics line    | Click to jump to that line              |
 | Now Playing line      | Click to pause / resume                 |
 | Search box            | Click to edit the search                |
+| Lyrics / Up next tabs | Click to switch                         |
+| Up next list          | Click to select, double-click to play now |
 
 While TuneTerm uses the mouse, most terminals still let you select text by holding **Shift** while dragging. Run with `--no-mouse` to turn mouse support off.
 

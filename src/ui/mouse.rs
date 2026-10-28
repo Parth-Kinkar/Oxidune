@@ -16,6 +16,14 @@ pub struct Regions {
     pub search: Option<Rect>,
     /// The text rows of the lyrics panel, and which lyric line is on the first row.
     pub lyrics: Option<(Rect, usize)>,
+    /// The rows of the Up next list, inside its border.
+    pub queue: Option<Rect>,
+    /// Row of the "shuffled ↓" line in the Up next list (in list rows, not
+    /// screen rows), if it's showing.
+    pub queue_separator: Option<usize>,
+    /// The "Lyrics" and "Up next" tabs in the side panel's title.
+    pub lyrics_tab: Option<Rect>,
+    pub queue_tab: Option<Rect>,
     /// The "▶ Artist — Title" line.
     pub now_playing: Option<Rect>,
     pub progress: Option<Rect>,
@@ -33,6 +41,16 @@ pub fn item_at(area: Rect, first: usize, column: u16, row: u16) -> Option<usize>
         .then(|| first + usize::from(row - area.y))
 }
 
+/// Turns a row of a list that has a non-item line (like "shuffled ↓") at
+/// `separator` into the index of the item on that row. None for the line itself.
+pub fn skip_separator(row: usize, separator: Option<usize>) -> Option<usize> {
+    match separator {
+        Some(line) if row == line => None,
+        Some(line) if row > line => Some(row - 1),
+        _ => Some(row),
+    }
+}
+
 /// How far along `area` the column is, from 0.0 (left edge) to 1.0 (right
 /// edge). Columns outside the area are clamped, so dragging past the end
 /// of the progress bar still means "the end".
@@ -44,15 +62,21 @@ pub fn fraction_at(area: Rect, column: u16) -> f64 {
     (offset / f64::from(area.width - 1)).clamp(0.0, 1.0)
 }
 
-/// Spots double clicks on list items.
-#[derive(Debug, Default)]
-pub struct DoubleClick {
-    last: Option<(Instant, usize)>,
+/// Spots double clicks. `T` says what was clicked, e.g. which list and row.
+#[derive(Debug)]
+pub struct DoubleClick<T> {
+    last: Option<(Instant, T)>,
 }
 
-impl DoubleClick {
+impl<T> Default for DoubleClick<T> {
+    fn default() -> Self {
+        Self { last: None }
+    }
+}
+
+impl<T: Copy + PartialEq> DoubleClick<T> {
     /// Records a click on `item`. Returns true if it completes a double click.
-    pub fn click(&mut self, item: usize, now: Instant) -> bool {
+    pub fn click(&mut self, item: T, now: Instant) -> bool {
         let double = matches!(
             self.last,
             Some((at, last)) if last == item && now.duration_since(at) <= DOUBLE_CLICK
@@ -87,6 +111,15 @@ mod tests {
         assert_eq!(fraction_at(bar, 2), 0.0);
         assert_eq!(fraction_at(bar, 500), 1.0);
         assert_eq!(fraction_at(Rect::new(0, 0, 1, 1), 0), 0.0);
+    }
+
+    #[test]
+    fn skip_separator_maps_rows_around_the_line() {
+        assert_eq!(skip_separator(0, Some(2)), Some(0));
+        assert_eq!(skip_separator(1, Some(2)), Some(1));
+        assert_eq!(skip_separator(2, Some(2)), None);
+        assert_eq!(skip_separator(3, Some(2)), Some(2));
+        assert_eq!(skip_separator(5, None), Some(5));
     }
 
     #[test]

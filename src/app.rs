@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::audio::{Command, Event as PlayerEvent, Player, StreamSpec};
+use crate::domain::queue::RepeatMode;
 use crate::domain::{Filter, Lyrics, Queue, Track};
 use crate::error::Result;
 use crate::library::Library;
@@ -41,6 +42,30 @@ pub enum LyricsState {
     Failed(String),
 }
 
+/// Which tab the right-hand panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SideTab {
+    Lyrics,
+    Queue,
+}
+
+/// Which list the keyboard acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    Library,
+    Queue,
+}
+
+/// What a click landed on, for spotting double clicks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClickTarget {
+    Library(usize),
+    Queue(usize),
+}
+
+/// How long a short message (like "Playing next: …") stays in the help line.
+const NOTICE_TIME: Duration = Duration::from_millis(2500);
+
 /// Application state and input handling. Draws nothing, decodes nothing.
 pub struct App {
     library: Library,
@@ -54,7 +79,12 @@ pub struct App {
     should_quit: bool,
     lyrics_service: LyricsService,
     lyrics: LyricsState,
-    show_lyrics: bool,
+    show_side: bool,
+    side_tab: SideTab,
+    focus: Focus,
+    /// Selection in the Up next list; a position in `queue.upcoming()`.
+    queue_state: ListState,
+    notice: Option<(String, Instant)>,
     filter: Filter,
     /// Library indices currently shown in the list. The list selection
     /// is a position in here, not a library index.
@@ -62,7 +92,7 @@ pub struct App {
     searching: bool,
     /// Where each panel was drawn last frame, for mouse clicks.
     regions: Regions,
-    double_click: DoubleClick,
+    double_click: DoubleClick<ClickTarget>,
     /// While dragging on the progress bar: the bar, and where the drag points.
     /// The seek is sent once, on release.
     seek_drag: Option<(Rect, Duration)>,
@@ -89,7 +119,11 @@ impl App {
             should_quit: false,
             lyrics_service: LyricsService::start(fetch_lyrics),
             lyrics: LyricsState::None,
-            show_lyrics: true,
+            show_side: true,
+            side_tab: SideTab::Lyrics,
+            focus: Focus::Library,
+            queue_state: ListState::default(),
+            notice: None,
             filter: Filter::default(),
             visible,
             searching: false,
@@ -174,6 +208,8 @@ impl App {
                 TermEvent::Key(key) if key.kind == KeyEventKind::Press => {
                     if self.searching {
                         self.on_search_key(key);
+                    } else if self.focus == Focus::Queue {
+                        self.on_queue_key(key.code);
                     } else {
                         self.on_key(key.code);
                     }
@@ -200,10 +236,138 @@ impl App {
             KeyCode::Char('z') => self.toggle_shuffle(),
             KeyCode::Right => self.seek_forward(),
             KeyCode::Left => self.seek_backward(),
-            KeyCode::Char('l') => self.show_lyrics = !self.show_lyrics,
-            KeyCode::Char('/') => self.searching = true,
+            KeyCode::Char('l') => self.toggle_tab(SideTab::Lyrics),
+            KeyCode::Char('u') => self.toggle_tab(SideTab::Queue),
+            KeyCode::Tab | KeyCode::BackTab => self.switch_focus(),
+            KeyCode::Char('a') => self.play_selected_next(),
+            KeyCode::Char('/') => {
+                self.focus = Focus::Library;
+                self.searching = true;
+            }
             KeyCode::Esc if !self.filter.is_empty() => self.clear_filter(),
             _ => {}
+        }
+    }
+
+    /// Keys while the Up next list has focus. Anything not about the
+    /// queue falls through to the normal keys.
+    fn on_queue_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Down | KeyCode::Char('j') => self.queue_state.select_next(),
+            KeyCode::Up | KeyCode::Char('k') => self.queue_state.select_previous(),
+            KeyCode::Enter => self.play_from_queue(),
+            KeyCode::Char('J') => self.move_in_queue(true),
+            KeyCode::Char('K') => self.move_in_queue(false),
+            KeyCode::Char('d') | KeyCode::Delete => self.remove_from_queue(),
+            KeyCode::Char('a') => {} // "play next" is for library tracks
+            other => self.on_key(other),
+        }
+    }
+
+    // ---- side panel and focus ----
+
+    /// Shows a tab, or hides the panel if that tab is already showing.
+    fn toggle_tab(&mut self, tab: SideTab) {
+        if self.side_tab() == Some(tab) {
+            self.show_side = false;
+        } else {
+            self.show_side = true;
+            self.side_tab = tab;
+        }
+        if self.side_tab() != Some(SideTab::Queue) {
+            self.focus = Focus::Library;
+        }
+    }
+
+    fn show_tab(&mut self, tab: SideTab) {
+        if self.side_tab() != Some(tab) {
+            self.toggle_tab(tab);
+        }
+    }
+
+    /// Tab key: moves focus between the library and Up next (if it's showing).
+    fn switch_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Library if self.side_tab() == Some(SideTab::Queue) => Focus::Queue,
+            _ => Focus::Library,
+        };
+        if self.focus == Focus::Queue && self.queue_state.selected().is_none() {
+            self.queue_state.select_first();
+        }
+    }
+
+    fn show_notice(&mut self, text: String) {
+        self.notice = Some((text, Instant::now()));
+    }
+
+    // ---- editing the queue ----
+
+    /// "a" on a library track: play it right after the current song.
+    /// If nothing is playing, just play it.
+    fn play_selected_next(&mut self) {
+        let Some(track) = self.selected_track() else {
+            return;
+        };
+        if self.queue.current().is_none() {
+            self.play_selected();
+            return;
+        }
+        if self.queue.current() == Some(track) {
+            self.show_notice("That song is already playing".into());
+            return;
+        }
+        self.queue.play_next(track);
+        self.update_next();
+        if let Some(t) = self.library.get(track) {
+            let text = format!("Playing next: {} — {}", t.artist, t.title);
+            self.show_notice(text);
+        }
+    }
+
+    /// Enter in Up next: play the selected song now.
+    fn play_from_queue(&mut self) {
+        let Some(index) = self.queue_state.selected() else {
+            return;
+        };
+        if self.queue.skip_to_upcoming(index).is_some() {
+            self.start_current();
+            self.queue_state.select_first();
+        }
+    }
+
+    fn move_in_queue(&mut self, later: bool) {
+        let Some(index) = self.queue_state.selected() else {
+            return;
+        };
+        if let Some(new_index) = self.queue.move_upcoming(index, later) {
+            self.queue_state.select(Some(new_index));
+            self.update_next();
+        }
+    }
+
+    fn remove_from_queue(&mut self) {
+        let Some(index) = self.queue_state.selected() else {
+            return;
+        };
+        if self.queue.remove_upcoming(index).is_some() {
+            let remaining = self.queue.upcoming().len();
+            self.queue_state
+                .select((remaining > 0).then(|| index.min(remaining - 1)));
+            self.update_next();
+        }
+    }
+
+    /// The queue moved on by one song: keep the same song selected in Up next.
+    fn follow_queue_selection(&mut self) {
+        if let Some(selected) = self.queue_state.selected() {
+            self.queue_state.select(Some(selected.saturating_sub(1)));
+        }
+    }
+
+    /// A song ended by itself. With repeat-one the queue didn't move.
+    fn follow_queue_after_track_end(&mut self) {
+        if self.queue.repeat() != RepeatMode::One {
+            self.follow_queue_selection();
         }
     }
 
@@ -244,6 +408,12 @@ impl App {
                 self.list_state.scroll_down_by(SCROLL_STEP)
             }
             MouseEventKind::ScrollUp if over_library => self.list_state.scroll_up_by(SCROLL_STEP),
+            MouseEventKind::ScrollDown if mouse::hit(self.regions.queue, column, row) => {
+                self.queue_state.scroll_down_by(SCROLL_STEP)
+            }
+            MouseEventKind::ScrollUp if mouse::hit(self.regions.queue, column, row) => {
+                self.queue_state.scroll_up_by(SCROLL_STEP)
+            }
             _ => {}
         }
     }
@@ -261,6 +431,10 @@ impl App {
         let list_item = regions
             .library
             .and_then(|area| mouse::item_at(area, self.list_state.offset(), column, row));
+        let queue_item = regions
+            .queue
+            .and_then(|area| mouse::item_at(area, self.queue_state.offset(), column, row))
+            .and_then(|row| mouse::skip_separator(row, regions.queue_separator));
         let lyric_line = regions
             .lyrics
             .and_then(|(area, top)| mouse::item_at(area, top, column, row));
@@ -270,8 +444,14 @@ impl App {
             .filter(|&bar| mouse::hit(Some(bar), column, row))
         {
             self.start_seek_drag(bar, column);
+        } else if mouse::hit(regions.lyrics_tab, column, row) {
+            self.show_tab(SideTab::Lyrics);
+        } else if mouse::hit(regions.queue_tab, column, row) {
+            self.show_tab(SideTab::Queue);
         } else if let Some(item) = list_item {
             self.click_list_item(item);
+        } else if let Some(item) = queue_item {
+            self.click_queue_item(item);
         } else if let Some(line) = lyric_line {
             self.seek_to_lyric(line);
         } else if mouse::hit(regions.now_playing, column, row)
@@ -283,12 +463,31 @@ impl App {
 
     /// Click selects; a double click plays.
     fn click_list_item(&mut self, item: usize) {
+        self.focus = Focus::Library;
         if item >= self.visible.len() {
             return; // empty space below the last track
         }
         self.list_state.select(Some(item));
-        if self.double_click.click(item, Instant::now()) {
+        if self
+            .double_click
+            .click(ClickTarget::Library(item), Instant::now())
+        {
             self.play_selected();
+        }
+    }
+
+    /// Click selects (and focuses Up next); a double click plays it now.
+    fn click_queue_item(&mut self, item: usize) {
+        self.focus = Focus::Queue;
+        if item >= self.queue.upcoming().len() {
+            return;
+        }
+        self.queue_state.select(Some(item));
+        if self
+            .double_click
+            .click(ClickTarget::Queue(item), Instant::now())
+        {
+            self.play_from_queue();
         }
     }
 
@@ -366,8 +565,25 @@ impl App {
         &self.lyrics
     }
 
-    pub fn show_lyrics(&self) -> bool {
-        self.show_lyrics
+    /// The side panel's tab, or None when the panel is hidden.
+    pub fn side_tab(&self) -> Option<SideTab> {
+        self.show_side.then_some(self.side_tab)
+    }
+
+    pub fn focus(&self) -> Focus {
+        self.focus
+    }
+
+    pub fn queue_state_mut(&mut self) -> &mut ListState {
+        &mut self.queue_state
+    }
+
+    /// A short message for the help line, while it's fresh.
+    pub fn notice(&self) -> Option<&str> {
+        self.notice
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() < NOTICE_TIME)
+            .map(|(text, _)| text.as_str())
     }
 
     // ---- playback actions ----
@@ -381,6 +597,7 @@ impl App {
 
     fn play_next(&mut self) {
         if self.queue.next().is_some() {
+            self.follow_queue_selection();
             self.start_current();
         }
     }
@@ -445,6 +662,7 @@ impl App {
             return; // stale: the user has already moved on
         }
         self.queue.on_track_end();
+        self.follow_queue_after_track_end();
         self.on_track_started();
     }
 
@@ -511,6 +729,7 @@ impl App {
 
     fn on_track_finished(&mut self) {
         if self.queue.on_track_end().is_some() {
+            self.follow_queue_after_track_end();
             self.start_current();
         } else {
             self.stop();

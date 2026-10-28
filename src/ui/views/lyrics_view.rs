@@ -4,16 +4,13 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::app::{App, LyricsState};
 use crate::domain::Lyrics;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
-    let block = Block::bordered().title(" Lyrics ");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
+/// Draws the lyrics inside `inner` (the side panel draws the border).
+pub fn render(frame: &mut Frame, inner: Rect, app: &mut App) {
     let top = match app.lyrics() {
         LyricsState::Ready(lyrics) => Some(render_lines(frame, inner, lyrics, app.position())),
         other => {
