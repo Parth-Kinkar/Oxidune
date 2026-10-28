@@ -7,7 +7,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::app::App;
 
-const HELP: &str = " ↑↓ select · / search · Enter play · Space pause · n/p next/prev · ←→ seek · r repeat · l lyrics · s stop · q quit";
+const HELP: &str = " ↑↓ select · / search · Enter play · Space pause · n/p next/prev · ←→ seek · r repeat · z shuffle · l lyrics · s stop · q quit";
 
 const SEARCH_HELP: &str =
     " type to filter · ↑↓ select · Backspace delete · Enter keep filter · Esc clear";

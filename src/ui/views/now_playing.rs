@@ -13,9 +13,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let [info, bar] = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(inner);
 
+    let modes = format!(
+        "repeat: {}  ·  shuffle: {}",
+        app.queue().repeat().label(),
+        if app.queue().shuffle() { "on" } else { "off" }
+    );
+
     let Some(track) = app.now_playing() else {
         let text = app.message().unwrap_or("Nothing playing");
-        frame.render_widget(Paragraph::new(text), info);
+        frame.render_widget(Paragraph::new(format!("{text}  ·  {modes}")), info);
         return;
     };
 
@@ -26,10 +32,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     };
     let spec = app.spec().map(|s| format!("  ·  {s}")).unwrap_or_default();
     let text = format!(
-        "{icon} {} — {}{spec}  ·  repeat: {}",
-        track.artist,
-        track.title,
-        app.queue().repeat().label()
+        "{icon} {} — {}{spec}  ·  {modes}",
+        track.artist, track.title
     );
     frame.render_widget(Paragraph::new(text), info);
 

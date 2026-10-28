@@ -166,6 +166,7 @@ impl App {
             KeyCode::Char('p') => self.play_previous(),
             KeyCode::Char('s') => self.player.send(Command::Stop),
             KeyCode::Char('r') => self.cycle_repeat(),
+            KeyCode::Char('z') => self.toggle_shuffle(),
             KeyCode::Right => self.seek_forward(),
             KeyCode::Left => self.seek_backward(),
             KeyCode::Char('l') => self.show_lyrics = !self.show_lyrics,
@@ -213,7 +214,11 @@ impl App {
 
         let position = selected
             .and_then(|track| self.visible.iter().position(|&i| i == track))
-            .or(if self.visible.is_empty() { None } else { Some(0) });
+            .or(if self.visible.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
         self.list_state.select(position);
     }
 
@@ -289,6 +294,11 @@ impl App {
     fn cycle_repeat(&mut self) {
         self.queue.cycle_repeat();
         self.update_next(); // what comes next may have changed
+    }
+
+    fn toggle_shuffle(&mut self) {
+        self.queue.toggle_shuffle();
+        self.update_next(); // the preloaded next track is now different
     }
 
     /// The player crossed into the preloaded next track on its own.

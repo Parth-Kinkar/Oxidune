@@ -12,10 +12,10 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 - [x] **Lyrics**: `.lrc` parser, line highlighting, local `.lrc` first, then fetched from [LRCLIB](https://lrclib.net) and cached next to the song, `--offline` flag
 - [x] **Gapless playback**: preload the next track so albums flow without a gap
 - [x] **Search / filter**: press `/` and type to narrow the list
+- [x] **Shuffle**: `z` toggles a random order; every track plays once before it ends
 
 ## Next up
 
-- [ ] **Shuffle**
 - [ ] **Bit-perfect output**: open an ALSA `hw:` device directly, with device selection
 
 ## Lyrics follow-ups
