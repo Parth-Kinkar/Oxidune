@@ -11,6 +11,7 @@ TuneTerm plays the files you already own: FLAC, ALAC (`.m4a`), WAV, MP3, and Ogg
 - Plays FLAC, ALAC/AAC (`.m4a`), WAV, MP3, and Ogg Vorbis
 - Terminal UI built with [ratatui](https://ratatui.rs)
 - Library scanning with tags read via [lofty](https://crates.io/crates/lofty)
+- Search: press `/` and type to filter by artist, title, or album
 - Queue with repeat modes (off / all / one)
 - Pause, resume, seek, next, previous
 - Synced lyrics, highlighted line by line as the song plays (see [Lyrics](#lyrics))
@@ -44,6 +45,8 @@ If you don't pass a directory, TuneTerm scans the current one.
 | `↑` / `k`        | Move selection up           |
 | `↓` / `j`        | Move selection down         |
 | `Enter`          | Play selected track         |
+| `/`              | Search: type to filter list |
+| `Esc`            | Clear search                |
 | `Space`          | Pause / resume              |
 | `n` / `p`        | Next / previous track       |
 | `←` / `→`        | Seek back / forward 5s      |

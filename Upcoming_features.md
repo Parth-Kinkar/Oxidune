@@ -11,10 +11,10 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 - [x] Basic TUI: library list, now playing, progress bar
 - [x] **Lyrics**: `.lrc` parser, line highlighting, local `.lrc` first, then fetched from [LRCLIB](https://lrclib.net) and cached next to the song, `--offline` flag
 - [x] **Gapless playback**: preload the next track so albums flow without a gap
+- [x] **Search / filter**: press `/` and type to narrow the list
 
 ## Next up
 
-- [ ] **Search / filter**: press `/` and type to narrow the list
 - [ ] **Shuffle**
 - [ ] **Bit-perfect output**: open an ALSA `hw:` device directly, with device selection
 

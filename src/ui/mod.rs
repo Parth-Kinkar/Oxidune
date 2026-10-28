@@ -7,7 +7,10 @@ use ratatui::widgets::Paragraph;
 
 use crate::app::App;
 
-const HELP: &str = " ↑↓ select · Enter play · Space pause · n/p next/prev · ←→ seek · r repeat · l lyrics · s stop · q quit";
+const HELP: &str = " ↑↓ select · / search · Enter play · Space pause · n/p next/prev · ←→ seek · r repeat · l lyrics · s stop · q quit";
+
+const SEARCH_HELP: &str =
+    " type to filter · ↑↓ select · Backspace delete · Enter keep filter · Esc clear";
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let [main, now_playing, help] = Layout::vertical([
@@ -28,5 +31,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     views::now_playing::render(frame, now_playing, app);
-    frame.render_widget(Paragraph::new(HELP).dark_gray(), help);
+    let help_text = if app.is_searching() {
+        SEARCH_HELP
+    } else {
+        HELP
+    };
+    frame.render_widget(Paragraph::new(help_text).dark_gray(), help);
 }

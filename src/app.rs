@@ -1,13 +1,15 @@
 use std::time::Duration;
 
 use crate::audio::{Command, Event as PlayerEvent, Player, StreamSpec};
-use crate::domain::{Lyrics, Queue, Track};
+use crate::domain::{Filter, Lyrics, Queue, Track};
 use crate::error::Result;
 use crate::library::Library;
 use crate::lyrics::{LyricsEvent, LyricsService};
 use crate::ui;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event as TermEvent, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+};
 use ratatui::widgets::ListState;
 use std::path::Path;
 
@@ -43,11 +45,17 @@ pub struct App {
     lyrics_service: LyricsService,
     lyrics: LyricsState,
     show_lyrics: bool,
+    filter: Filter,
+    /// Library indices currently shown in the list. The list selection
+    /// is a position in here, not a library index.
+    visible: Vec<usize>,
+    searching: bool,
 }
 
 impl App {
     pub fn new(library: Library, fetch_lyrics: bool) -> Self {
         let queue = Queue::new(library.len());
+        let visible = (0..library.len()).collect();
         let mut list_state = ListState::default();
         if library.len() > 0 {
             list_state.select_first();
@@ -66,6 +74,9 @@ impl App {
             lyrics_service: LyricsService::start(fetch_lyrics),
             lyrics: LyricsState::None,
             show_lyrics: true,
+            filter: Filter::default(),
+            visible,
+            searching: false,
         }
     }
 
@@ -109,6 +120,20 @@ impl App {
         &mut self.list_state
     }
 
+    /// Library indices of the tracks shown in the list, in display order.
+    pub fn visible(&self) -> &[usize] {
+        &self.visible
+    }
+
+    pub fn filter_query(&self) -> &str {
+        self.filter.query()
+    }
+
+    /// True while the user is typing a search query.
+    pub fn is_searching(&self) -> bool {
+        self.searching
+    }
+
     pub fn now_playing(&self) -> Option<&Track> {
         self.queue.current().and_then(|i| self.library.get(i))
     }
@@ -119,7 +144,11 @@ impl App {
         if event::poll(INPUT_POLL)? {
             if let TermEvent::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    self.on_key(key.code);
+                    if self.searching {
+                        self.on_search_key(key);
+                    } else {
+                        self.on_key(key.code);
+                    }
                 }
             }
         }
@@ -140,8 +169,59 @@ impl App {
             KeyCode::Right => self.seek_forward(),
             KeyCode::Left => self.seek_backward(),
             KeyCode::Char('l') => self.show_lyrics = !self.show_lyrics,
+            KeyCode::Char('/') => self.searching = true,
+            KeyCode::Esc if !self.filter.is_empty() => self.clear_filter(),
             _ => {}
         }
+    }
+
+    /// Keys while typing a search. Letters go into the query, so 'q' or 'n'
+    /// type instead of quitting or skipping.
+    fn on_search_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.searching = false;
+                self.clear_filter();
+            }
+            KeyCode::Enter => self.searching = false, // keep the filter, back to normal keys
+            KeyCode::Backspace => {
+                self.filter.pop();
+                self.refresh_filter();
+            }
+            KeyCode::Down => self.list_state.select_next(),
+            KeyCode::Up => self.list_state.select_previous(),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.filter.push(c);
+                self.refresh_filter();
+            }
+            _ => {}
+        }
+    }
+
+    // ---- search ----
+
+    fn clear_filter(&mut self) {
+        self.filter.clear();
+        self.refresh_filter();
+    }
+
+    /// Recomputes the visible tracks, keeping the selected track selected
+    /// if it still matches, otherwise selecting the first match.
+    fn refresh_filter(&mut self) {
+        let selected = self.selected_track();
+        self.visible = self.filter.apply(self.library.tracks());
+
+        let position = selected
+            .and_then(|track| self.visible.iter().position(|&i| i == track))
+            .or(if self.visible.is_empty() { None } else { Some(0) });
+        self.list_state.select(position);
+    }
+
+    /// Library index of the track under the cursor.
+    fn selected_track(&self) -> Option<usize> {
+        self.list_state
+            .selected()
+            .and_then(|position| self.visible.get(position).copied())
     }
 
     pub fn lyrics(&self) -> &LyricsState {
@@ -155,7 +235,7 @@ impl App {
     // ---- playback actions ----
 
     fn play_selected(&mut self) {
-        if let Some(index) = self.list_state.selected() {
+        if let Some(index) = self.selected_track() {
             self.queue.jump_to(index);
             self.start_current();
         }
