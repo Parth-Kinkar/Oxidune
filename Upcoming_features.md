@@ -17,9 +17,12 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 
 ## Next up
 
-- [ ] **Bit-perfect output**: open an ALSA `hw:` device directly, with device selection
 - [ ] **Mouse support**: click to select and play tracks, click the progress bar to seek, scroll lists
 - [ ] **Up next / queue view**: see which songs play next (especially with shuffle on), and edit the queue: reorder, remove, or pick what plays next
+- [ ] **Collapsible panels**: some sections (e.g. lyrics, queue, output devices) only show up when clicked or selected
+- [ ] **Output devices and bit-perfect mode** (needs panels + mouse first): a device picker panel listing each output with what it supports (e.g. "up to 384 kHz / 32-bit"; Bluetooth shows its codec and is shared-only), and a choice of:
+  - *Shared*: through PipeWire, other apps can play too; PipeWire may resample and apply system volume
+  - *Exclusive (bit-perfect)*: open the ALSA `hw:` device directly at the song's exact rate and bit depth; no other audio, no software volume
 
 ## Lyrics follow-ups
 
@@ -38,7 +41,6 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 - [ ] Config file (TOML): music directory, output device, keybinds
 - [ ] Library cache so launches stay fast with large libraries
 - [ ] Remember last queue and position
-- [ ] Collapsible panels: some sections (e.g. lyrics, queue) only show up when clicked or selected
 
 ## Integration and release
 
