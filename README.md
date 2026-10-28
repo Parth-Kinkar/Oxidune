@@ -1,4 +1,4 @@
-# TuneTerm
+# Oxidune
 
 A terminal music player for lossless audio, written in Rust.
 
