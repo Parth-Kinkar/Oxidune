@@ -4,7 +4,7 @@ A terminal music player for lossless audio, written in Rust.
 
 TuneTerm plays the files you already own: FLAC, ALAC (`.m4a`), WAV, MP3, and Ogg. It is built around clean, readable code and a small set of well-separated parts, not a pile of features.
 
-> **Status:** early development. Playback, queue, lyrics, and the basic TUI work. See [upcoming_features.md](upcoming_features.md) for what is planned.
+> **Status:** early development. Playback, queue, lyrics, and the basic TUI work. See [Upcoming_features.md](Upcoming_features.md) for what is planned.
 
 ## Features
 
@@ -26,8 +26,8 @@ TuneTerm plays the files you already own: FLAC, ALAC (`.m4a`), WAV, MP3, and Ogg
 ## Build and run
 
 ```bash
-git clone <your-repo-url>
-cd TuneTerm
+git clone https://github.com/Parth-Kinkar/Oxidune.git
+cd Oxidune
 cargo run --release -- /path/to/your/music
 ```
 
@@ -95,8 +95,8 @@ cargo test
 
 ## Roadmap
 
-See [upcoming_features.md](upcoming_features.md).
+See [Upcoming_features.md](Upcoming_features.md).
 
 ## License
 
-Choose a license before publishing, for example `MIT OR Apache-2.0`, and add a `LICENSE` file.
+Licensed under the [Apache License 2.0](LICENSE).

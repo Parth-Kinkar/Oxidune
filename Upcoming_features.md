@@ -43,7 +43,7 @@ Planned work, in the order I intend to build it. Tick the boxes as things land.
 - [ ] More tests
 - [ ] CI
 - [ ] AUR package
-- [ ] License file
+- [x] License file
 
 ## Deliberately skipped
 
